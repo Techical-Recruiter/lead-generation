@@ -88,9 +88,6 @@ def scrape_lead_data(url):
         emails = re.findall(r"[a-zA-Z0-9_.+-]+@[a-zA-Z0-9-]+\.[a-zA-Z0-9-.]+", text)
         cleaned_emails = ", ".join(set(emails)) if emails else None
 
-        if not cleaned_emails:
-            return None
-
         # Extract and format phone numbers
         phones = re.findall(r"(\+?\d[\d\s().-]{6,}\d)", text)
         cleaned_phones = []
@@ -103,6 +100,9 @@ def scrape_lead_data(url):
                     clean_num = "+" + clean_num
                 cleaned_phones.append(clean_num)
         formatted_phones = ", ".join(sorted(list(set(cleaned_phones)))) if cleaned_phones else None
+
+        if not cleaned_emails and not formatted_phones:
+            return None
 
         # Extract Name
         name = None
@@ -125,7 +125,7 @@ def scrape_lead_data(url):
         possible_company = None
         for line in text.splitlines():
             if " at " in line.lower():
-                parts = line.split(" at ")
+                parts = line.split(" at ")  
                 if len(parts) > 1 and len(parts[-1].strip()) > 2:
                     possible_company = parts[-1].strip()
                     possible_company = re.sub(r'\s*(Pvt|Ltd|LLC|Inc|GmbH|Corp)\.?\s*$', '', possible_company, flags=re.IGNORECASE).strip()
@@ -161,16 +161,15 @@ def scrape_lead_data(url):
             "URL": url,
             "Email": cleaned_emails,
             "Phone": formatted_phones,
-            "Name": name,
-            "Company Name": possible_company or title,
-            "Company URL": company_url,
-            "Scraping Error": None
+            "Name": name,  # From your existing code
+            "Company Name": possible_company or title,  # From your existing code
+            "Company URL": company_url,  # From your existing code
+            "Contact Type": "Email Only" if cleaned_emails and not formatted_phones 
+                          else "Phone Only" if formatted_phones and not cleaned_emails
+                          else "Both"
         }
-    except requests.exceptions.RequestException as req_err:
-        print(f"Network/Request error scraping {url}: {req_err}")
-        return None
     except Exception as e:
-        print(f"General error scraping {url}: {e}")
+        print(f"Error scraping {url}: {e}")
         return None
 
 def scrape_company_funding_data(url):
@@ -530,21 +529,48 @@ if selected == "👤 Lead Contacts":
 
             my_bar.empty()
 
+            # After scraping completes
             if lead_data:
                 df = pd.DataFrame(lead_data)
-                df.drop_duplicates(subset=['URL'], inplace=True)
-                df.drop_duplicates(subset=['Email'], inplace=True, keep='first') 
-
-                st.subheader(f"Found Individual Leads (Email Present: {len(df)})")
+                
+                # New: Categorize leads
+                df['Contact Type'] = df.apply(
+                    lambda x: "Email Only" if x['Email'] and not x['Phone'] else
+                            "Phone Only" if x['Phone'] and not x['Email'] else
+                            "Both",
+                    axis=1
+                )
+                
+                # Display stats
+                st.write(f"Total Leads Found: {len(df)}")
+                st.write(f"Email Only: {len(df[df['Contact Type']=='Email Only'])}")
+                st.write(f"Phone Only: {len(df[df['Contact Type']=='Phone Only'])}")
+                st.write(f"Both Email & Phone: {len(df[df['Contact Type']=='Both'])}")
+                
+                # Filter options
+                view_option = st.radio(
+                    "Show:",
+                    ["All Leads", "Email Only", "Phone Only", "Both Email & Phone"]
+                )
+                
+                if view_option == "Email Only":
+                    df = df[df['Contact Type'] == "Email Only"]
+                elif view_option == "Phone Only":
+                    df = df[df['Contact Type'] == "Phone Only"]
+                elif view_option == "Both Email & Phone":
+                    df = df[df['Contact Type'] == "Both"]
+                
+                # Display the filtered dataframe
                 st.dataframe(df)
                 
-                if not df.empty:
-                    csv = df.to_csv(index=False).encode('utf-8')
-                    st.download_button("⬇️ Download Individual Leads CSV", data=csv, file_name="individual_leads_with_emails.csv", mime="text/csv")
-                else:
-                    st.info("No individual leads with email addresses found after scraping.")
-            else:
-                st.warning("⚠️ No individual leads with email addresses could be extracted from the scanned pages.")
+                # Download options
+                csv = df.to_csv(index=False).encode('utf-8')
+                st.download_button(
+                    label=f"Download {view_option} Leads",
+                    data=csv,
+                    file_name=f"{view_option.lower().replace(' ', '_')}_leads.csv",
+                    mime="text/csv"
+                )
 
 # --- Company Funding Tab ---
 elif selected == "💰 Company Funding":
